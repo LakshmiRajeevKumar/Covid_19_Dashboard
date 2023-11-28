@@ -1,0 +1,190 @@
+---
+title: "COVID-19 dashboard"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r include=FALSE}
+setwd("F:/Rlesson8")
+```
+
+```{r warning=FALSE, message=FALSE, error=FALSE,include=FALSE }
+library(flexdashboard)
+library(tidyverse)
+library(ggthemes) 
+library(plotly)
+library(sf)
+library(leaflet)
+library(gganimate)
+library(tmap)
+library(curl)
+```
+
+```{r warning=FALSE, message=FALSE, error=FALSE,include=FALSE }
+covid19_est <- read.csv("F:/Rlesson8/opendata_covid19_test_county_all.csv")
+covid19_est <- covid19_est %>% 
+  mutate(LastStatisticsDate  = as.Date(LastStatisticsDate, "%Y-%m-%d"), 
+         StatisticsDate      = as.Date(StatisticsDate,"%Y-%m-%d"))
+covid19_est_P <- covid19_est %>% 
+  filter(ResultValue == "P")
+covid19_est_P$County <- str_replace(covid19_est_P$County, " maakond", "")
+covid19_est_P_backup <- covid19_est_P
+covid19_est_P <- covid19_est_P %>% 
+  filter(!is.na(CountryEHAK))
+covid19_test_county_all <- covid19_est_P %>% 
+  filter(County == "Tartu" | County =="Ida-Viru")
+
+
+```
+
+```{r warning=FALSE, message=FALSE, error=FALSE,include=FALSE }
+covid19_test_county_all_latest <- covid19_est_P %>% 
+  select(CountyEHAK, DailyCases, StatisticsDate) %>% 
+  filter(StatisticsDate == max(StatisticsDate))
+
+download.file("https://geoportaal.maaamet.ee/docs/haldus_asustus/maakond_shp.zip", destfile="maakond_shp.zip")
+unzip("maakond_shp.zip")
+list.files(pattern = ".shp")
+county <- st_read("maakond_20230101.shp")
+glimpse(county)
+county <- county %>% 
+  st_simplify(preserveTopology = TRUE, dTolerance = 200) %>% 
+  st_cast("MULTIPOLYGON")
+county <- county %>% 
+  mutate(MKOOD  = as.numeric(MKOOD))
+glimpse(county)
+covid19_test_county_all_latest_sf <- left_join(county, covid19_test_county_all_latest, by = c("MKOOD" = "CountyEHAK"))
+
+covid19_test_county_all_latest_sf_cntr <- covid19_test_county_all_latest_sf %>% 
+  st_centroid()
+covid19_test_county_all_latest_sf_4326 <- covid19_test_county_all_latest_sf %>% 
+  st_transform(4326)
+# labels:
+covid19_test_county_all_latest_sf_cntr_4326 <- covid19_test_county_all_latest_sf_cntr %>% 
+  st_transform(4326)
+```
+
+```{r warning=FALSE, message=FALSE, error=FALSE,include=FALSE}
+download.file("https://opendata.digilugu.ee/covid19/vaccination/v3/opendata_covid19_vaccination_location_county.csv", destfile ="opendata_covid19_vaccination_location_county.csv")
+vaccination <- st_read("opendata_covid19_vaccination_location_county.csv")
+head(vaccination)
+glimpse(vaccination)
+vaccination <- vaccination %>% 
+  mutate(DailyCount  = as.numeric(DailyCount), 
+         StatisticsDate = as.Date(StatisticsDate,"%Y-%m-%d"),
+         TotalCount = as.numeric(TotalCount),
+         PopulationCoverage = as.numeric(PopulationCoverage),
+         LocationCountyEHAK  = as.numeric(LocationCountyEHAK))
+glimpse(vaccination)
+vaccination$LocationCounty <- str_replace(vaccination$LocationCounty, " maakond", "")
+vaccination <- vaccination %>% 
+  filter(!is.na(LocationCountyEHAK))
+vaccination_backup <- vaccination
+
+vaccination <- vaccination %>% 
+  mutate(LocationPopulation  = as.numeric(LocationPopulation))
+
+vaccination_county_pie<- vaccination %>%
+  select(LocationCounty, TotalCount, LocationPopulation) %>%
+  group_by(LocationCounty)%>%
+  mutate(lab.ypos = cumsum(TotalCount), pop = (LocationPopulation/1000))
+
+my_col = c("coral", "chocolate", "brown", "blue", "deeppink", "red", "purple", "hotpink", "green", "yellow", "cyan", "olivedrab", "tan2", "gold4", "slateblue3")
+```
+
+```{r warning=FALSE, message=FALSE, error=FALSE,include=FALSE}
+vaccination <- vaccination %>% 
+  filter(!is.na(LocationCountyEHAK))
+head(vaccination)
+
+vaccination_county_latest <- vaccination %>%
+  select(LocationCountyEHAK, TotalCount, StatisticsDate) %>%
+  group_by(LocationCountyEHAK)%>%
+  filter(StatisticsDate == max(StatisticsDate))%>%
+  summarise(total_count=sum(TotalCount))
+  
+  
+
+glimpse(vaccination_county_latest)
+vaccination_county_all_latest_sf <- left_join(county, vaccination_county_latest, by = c("MKOOD" = "LocationCountyEHAK"))
+
+vaccination_county_all_latest_sf_cntr <- vaccination_county_all_latest_sf %>% 
+  st_centroid()
+vaccination_county_all_latest_sf_4326 <- vaccination_county_all_latest_sf %>% 
+  st_transform(4326)
+# labels:
+vaccination_county_all_latest_sf_cntr_4326 <- vaccination_county_all_latest_sf_cntr %>% 
+  st_transform(4326)
+```
+
+## Column {data-width="650"}
+
+### Map of distribution of COVID-19 daily positive cases in Estonian counties
+
+```{r echo = F,warning=FALSE, message=FALSE, error=FALSE}
+tmap_mode("view")
+tm_shape(covid19_test_county_all_latest_sf_4326)+
+  tm_polygons(col = "DailyCases", 
+              style = "pretty",
+              palette = "Reds",
+              alpha = 1)+
+  tm_shape(covid19_test_county_all_latest_sf_cntr_4326)+
+  tm_text(text = "DailyCases",
+          bg.color = "grey",
+          shadow = F)
+```
+
+### Comparative map of daily cases in Tartu and Ida-Viru in the last two weeks
+
+```{r echo = F,warning=FALSE, message=FALSE, error=FALSE}
+gg_cov_cases<- ggplot()+
+  theme_classic()+
+  geom_line(data = covid19_test_county_all, aes(x= StatisticsDate, y = DailyCases , color = County), size= .25, alpha = .5)+
+  scale_colour_manual(values = c("blue", "red"))
+plotly::ggplotly(gg_cov_cases)
+
+```
+
+## Column {data-width="650"}
+
+### Vaccination level in counties
+
+```{r echo = F,warning=FALSE, message=FALSE, error=FALSE}
+plotly::plot_ly(data=vaccination_county_pie,values= ~lab.ypos ,labels=~factor(LocationCounty),
+                textposition="outside",textinfo = 'label+percent',
+                text = ~paste('Population', pop, 'thousand'),
+                hoverinfo='text',outsidetextfont = list(color = 'red'),
+                marker=list(colors=c("coral", "chocolate", "brown", "blue", "deeppink", "red", "purple", "hotpink", "green", "yellow", "cyan", "olivedrab", "tan2", "gold4", "slateblue3"),
+                            line=list(color="white",width=2)),type="pie")
+  
+
+```
+
+### Vaccination level in counties - Total count
+
+```{r echo = F,warning=FALSE, message=FALSE, error=FALSE}
+tmap_mode("view")
+tm_shape(vaccination_county_all_latest_sf_4326)+
+  tm_polygons(col = "total_count",title = "Total count", 
+              style = "pretty",
+              palette = "Greens",
+              alpha = 1)+
+  tm_shape(vaccination_county_all_latest_sf_cntr_4326)+
+  tm_text(text = "total_count",
+          bg.color = "grey",
+          shadow = F)
+```
+
+Source: Estonian Board of Health
+
+URL: <https://www.terviseamet.ee/et/koroonaviirus/avaandmed>
+
+Author: Lakshmi Rajeev Kumar
+
+Supervisors: Anto Aasa & Lika Zhvania
