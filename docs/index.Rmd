@@ -157,7 +157,7 @@ plotly::ggplotly(gg_cov_cases)
 
 ```{r echo = F,warning=FALSE, message=FALSE, error=FALSE}
 plotly::plot_ly(data=vaccination_county_pie,values= ~lab.ypos ,labels=~factor(LocationCounty),
-                textposition="outside",textinfo = 'label+percent',
+                textposition="inside",textinfo = 'label+percent',
                 text = ~paste('Population', pop, 'thousand'),
                 hoverinfo='text',outsidetextfont = list(color = 'red'),
                 marker=list(colors=c("coral", "chocolate", "brown", "blue", "deeppink", "red", "purple", "hotpink", "green", "yellow", "cyan", "olivedrab", "tan2", "gold4", "slateblue3"),
